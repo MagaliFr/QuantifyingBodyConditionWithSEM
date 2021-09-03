@@ -1,0 +1,1328 @@
+---
+title: "R-code for the paper 'Conceptualizing and quantifying body condition using structural equation modelling: A user guide.' (Frauendorf et al.) for the simulation analysis"
+author: "Magali Frauendorf"
+date: "25-08-2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = 'P:/CHIRP/Manuscripts/Magali/Chp 2 - Methodological SEM/Submission process/JAE/11_Proofing/CodesGithub/QuantifyingBodyConditionWithSEM')
+```
+
+Import packages (versions are shown behind the #)
+```{r, include=F}
+library(lavaan)
+library(car)
+library(ggplot2)
+library(dplyr)
+library(lattice)
+library(FactoMineR)
+library(factoextra)
+library(knitr) #1.30
+library(ggplot2) #3.3.5 
+library(ggpubr)
+library(patchwork)
+library(gridExtra)
+library(grid)
+
+
+
+library(car) #3.0-2
+library(caret) #6.0-86 
+library(colorspace) #2.0-1
+library(corrplot) #0.89
+library(dplyr) #1.0.6
+library(egg) #0.4.5
+library(factoextra) #1.0.7 
+library(FactoMineR) #2.3
+library(ggfortify) #0.4.5
+library(ggpubr) #0.4.0
+library(grid) #3.5.1
+library(gridExtra) #2.3
+library(lattice) #0.20-35
+library(lavaan) #0.6-8 
+library(patchwork) #1.1.1
+library(plyr) #1.8.6
+library(tidyr) #1.1.3
+library(tidyverse) #1.3.1 
+library(unikn) #0.2.0
+```
+
+Import data and prepare data for analysis
+```{r include=F}
+
+data<-read.csv("data.csv", header=T,dec=",", sep=";") 
+str(data)
+
+# select only adults and sub adults
+d<-subset(data,Age=="Adult" |  Age=="Sub-Adult")
+
+##### change unit cho and uric acid
+xyplot(H~Cho, data=d,type=c("r", "p"))
+cor(d$H,d$Cho, use="complete.obs")#0.28
+
+xyplot(H~U, data=d,type=c("r", "p"))
+cor(d$H,d$U, use="complete.obs")#0.19
+
+d$H_B<-d$H+d$B
+summary(d$H_B)
+d$Cho_perVolBlood<-(d$Cho)/(1-d$H_B)
+head(d)
+xyplot(H~Cho_perVolBlood, data=d,type=c("r", "p"))
+cor(d$H, d$Cho_perVolBlood, use="complete.obs")#0.53
+
+d$U_perVolBlood<-(d$U)/(1-d$H_B)
+xyplot(H~U_perVolBlood, data=d,type=c("r", "p"))
+cor(d$H, d$U_perVolBlood, use="complete.obs")#0.28
+cor(d$Cho_perVolBlood, d$U_perVolBlood, use="complete.obs")
+
+#### standardize CORT for year of analysis
+Cort2016<-subset(d, SY=="2016_2017",
+                 select=c(BirdId, Cort))
+Cort2016$CortStd<-(Cort2016$Cort-(mean(Cort2016$Cort,na.rm=T)))/(sd(Cort2016$Cort, na.rm=T))
+summary(Cort2016$CortStd)
+mean(Cort2016$CortStd, na.rm=T)
+sd(Cort2016$CortStd, na.rm=T)
+Cort2016<-na.omit(Cort2016)
+
+Cort2017<-subset(d, SY=="2017_2018",
+                 select=c(BirdId, Cort))
+Cort2017$CortStd<-(Cort2017$Cort-(mean(Cort2017$Cort,na.rm=T)))/(sd(Cort2017$Cort, na.rm=T))
+summary(Cort2017$CortStd)
+mean(Cort2017$CortStd, na.rm=T)
+sd(Cort2017$CortStd, na.rm=T)
+Cort2017<-na.omit(Cort2017)
+
+Cort2016_2018<-rbind(Cort2016, Cort2017)
+Cort2016_2018<-subset(Cort2016_2018,
+                      select=c(BirdId,CortStd))
+d<-left_join(d, Cort2016_2018, by="BirdId") 
+
+#### histogram voor supplements corticosterone ###
+Cort2016$Year<-"2016-2017"
+Cort2017$Year<-"2017-2018"
+CortSuppl<-rbind(Cort2016, Cort2017)
+
+mean(Cort2016$Cort)
+sd(Cort2016$Cort)
+min(Cort2016$Cort)
+max(Cort2016$Cort)
+
+mean(Cort2017$Cort)
+sd(Cort2017$Cort)
+min(Cort2017$Cort)
+max(Cort2017$Cort)
+mean <- c(4.2,10.8)
+Year <- c("2016-2017", "2017-2018")
+mu<-data.frame(mean, Year)
+mu
+
+f<-subset(d,
+          select=c(BirdId,LS,CS, HS, SexN, AgeN,TA,HT,CortStd,SurvWS,Cho_perVolBlood,U_perVolBlood,LogitH,LogitB,
+                   BH,MS,Age,TH,WL,
+                   LogitSurvWS, CL, SY, Density))
+f<-na.omit(f) #n=427
+
+#standardize variables
+f$nHT<-(f$HT-mean(f$HT, na.rm=T))/(sd(f$HT, na.rm=T))
+f$nWL<-(f$WL-mean(f$WL, na.rm=T))/(sd(f$WL, na.rm=T))
+f$nTA<-(f$TA-mean(f$TA, na.rm=T))/(sd(f$TA, na.rm=T))
+f$nBH<-(f$BH-mean(f$BH, na.rm=T))/(sd(f$BH, na.rm=T))
+f$nTH<-(f$TH-mean(f$TH, na.rm=T))/(sd(f$TH, na.rm=T))
+
+#ratio
+f$ratio<-f$MS/f$TA
+
+#residuals
+m2<-lm(MS~TA+WL+TH, data=f)
+f$Residuals<-resid(m2)
+```
+
+
+```{r include=F}
+#Scaling variables:
+f$CortStd10<-f$CortStd/10
+f$nBH10<-f$nBH/10
+f$MSK<-f$MS/1000
+f$LS<-f$LS/100
+f$CS<-f$CS/100
+f$HS<-f$HS/100
+f$Density<-f$Density/100
+f$TA<-f$TA/100
+f$TH<-f$TH/100
+f$WL<-f$WL/100
+f$Cho_perVolBlood<-f$Cho_perVolBlood/10
+f$nHT10<-f$nHT/10
+```
+
+Import global environment (then skip the simulation steps of SEM and PCA/MR, until line 423)
+```{r}
+load('Simulation.RData')
+```
+
+
+Simulate data for the SEM approach
+```{r include=F}
+#final model (Fig. 5)
+analyzeModel <- '
+#Bill colour
+BCol =~ HS
+
+#Energy store
+ES =~ lMS + ratio    
+lMS =~ MSK
+lMS ~ TA + TH +WL     
+lMS~~0*lMS
+
+#cond variables: regress confounding and individual variables on the different condition measures
+lCho =~ Cho_perVolBlood
+lH =~ LogitH 
+lB =~ LogitB
+lU =~ U_perVolBlood
+lCort =~ CortStd10
+lB ~ AgeN+SexN+nBH10+nHT10 
+lH ~ AgeN+SexN+nBH10+nHT10 
+lCho ~ AgeN+SexN+nBH10+nHT10 
+ES ~ AgeN+SexN+nBH10+nHT10 
+lU ~ AgeN+SexN+nBH10+nHT10 
+lCort ~ AgeN+SexN+nBH10
+BCol ~ AgeN+SexN+nBH10
+
+#composite
+Comp <~ -1*ES+lCort+BCol+lH+lB+lCho+lU  #lCho+lB+lH+ #define the composite variable with the condition variables
+LogitSurvWS ~ Comp  
+
+#add covariance structure
+lCho~~lH
+lU~~lH 
+'
+s<-sem(analyzeModel, data=f)
+summary(s)
+
+# use unstandardized estimates from analyzeModel for simulation
+popModel<-'
+BCol =~ 1*HS
+
+ES =~ 1*lMS+ 10.313*ratio         
+lMS =~ 1*MSK
+lMS ~ 0.577*TA + -0.000*TH + -0.001*WL       
+
+#cond variables: regress confounding and individual variables on the different condition measures
+lCho =~ 1*Cho_perVolBlood
+lH =~ 1*LogitH 
+lB =~ 1*LogitB
+lU =~ 1*U_perVolBlood
+lCort =~ 1*CortStd10
+lB ~ -0.182*AgeN + 0.016*SexN + 0.282*nBH10 + -0.219*nHT10 
+lH ~ -0.051*AgeN + -0.005*SexN + -0.089*nBH10 + -0.038*nHT10 
+lCho ~ 0.052*AgeN + -0.034*SexN + 0.188*nBH10 + 0.468*nHT10 
+ES ~ 0.028*AgeN + -0.014*SexN + 0.009*nBH10 + -0.079*nHT10 
+lU ~ -0.051*AgeN + -0.119*SexN + -0.437*nBH10 + -0.742*nHT10 
+lCort ~ -0.049*AgeN + 0.008*SexN + 0.098*nBH10
+BCol ~ -0.026*AgeN + -0.025*SexN + 0.108*nBH10
+
+Comp <~ -1*ES + -0.219*lCort + 0.171*BCol + 0.012*lH + 0.024*lB + -0.053*lCho + -0.002*lU
+LogitSurvWS ~ 3.489*Comp  
+
+#add covariance structure
+lCho ~~ 0.016*lH
+lU ~~ 0.019*lH 
+
+# variances
+lMS ~~ 0*lMS
+'
+
+num_sims<-1000
+set.seed(12345) #seed is necessay for reproducibility
+sim_output_unstd <- rep(NA, times = num_sims) #This creates a vector of 1000 NA values
+mydata <- list() #add var names
+sim_output_std <- list()
+
+
+for (sim_number in 1:num_sims){ #this starts your for loop
+  mydata[[sim_number]] <- simulateData(popModel, sample.nobs=1000L, model.type="sem")
+  summary<-summary(sem(analyzeModel, data=mydata[[sim_number]]), standardized=T)
+  sim_output_unstd[sim_number] <- summary #this is where you store your output for each simulation
+}
+
+CombinedDF_SEMunstd<-do.call(rbind.data.frame, sim_output_unstd)
+CombinedDF_SEMunstd$lhs<-factor(CombinedDF_SEMunstd$lhs)
+CombinedDF_SEMunstd$rhs<-factor(CombinedDF_SEMunstd$rhs)
+```
+
+Simulate data for the conventional approach
+```{r include=F}
+d<-list()
+PCA_Fat<-list()
+res.pca1<-list()
+axes_Fat<-list()
+sim_output_pca<-list()
+summary_pca<-list()
+sim_coef<-list()
+sim_coefTr<-list()
+sim_coefTrSE<-list()
+
+for (sim_number in 1:num_sims) { 
+  #residuals mass
+  mydata[[sim_number]]$residMSPCA <- resid(lm(MSK~TA+TH+WL, data=mydata[[sim_number]]))
+  #PCA energ store (fat) from residuals and ratio
+  PCA_Fat[[sim_number]]<-data.frame(mydata[[sim_number]]$ratio, mydata[[sim_number]]$residMSPCA)
+  colnames(PCA_Fat[[sim_number]]) <- c("Ratio", "Residuals")
+  res.pca1[[sim_number]]<-PCA(PCA_Fat[[sim_number]], scale.unit = TRUE, ncp = 5, graph = TRUE)
+  axes_Fat[[sim_number]]<-data.frame(res.pca1[[sim_number]]$ind$coord)
+  #d[[sim_number]]<-subset(d[[sim_number]],select=c(1:19,23:25))
+  d[[sim_number]]<- cbind(mydata[[sim_number]], axes_Fat[[sim_number]])
+  d[[sim_number]]$PC1_Fat<-d[[sim_number]]$Dim.1
+  #multiple regressions
+  d[[sim_number]]$residCort<-resid(lm(CortStd10~SexN+nBH10+AgeN, data=d[[sim_number]]))
+  d[[sim_number]]$residCho<-resid(lm(Cho_perVolBlood~SexN+nBH10+nHT10+AgeN, data=d[[sim_number]]))
+  d[[sim_number]]$residU<-resid(lm(U_perVolBlood~SexN+nBH10+nHT10+AgeN, data=d[[sim_number]]))
+  d[[sim_number]]$residH<-resid(lm(LogitH~SexN+nBH10+nHT10+AgeN, data=d[[sim_number]]))
+  d[[sim_number]]$residB<-resid(lm(LogitB~SexN+nBH10+nHT10+AgeN, data=d[[sim_number]]))
+  d[[sim_number]]$residFat<-resid(lm(PC1_Fat~SexN+nBH10+AgeN+nHT10, data=d[[sim_number]]))
+  d[[sim_number]]$residBill<-resid(lm(HS~SexN+nBH10+AgeN, data=d[[sim_number]]))
+  #summary effect of variables on surv
+  summary_pca[[sim_number]]<-summary(lm(LogitSurvWS~residFat+residBill+residCort+residCho+residU+residH+residB, data=d[[sim_number]]))
+  #extract variables and put into format
+  sim_coef[[sim_number]]<-data.frame(summary_pca[[sim_number]]$coefficients)
+  sim_coefTr[[sim_number]]<-sim_coef[[sim_number]]$Estimate #extract estimates
+  CombinedDF_pca<-do.call(rbind.data.frame, sim_coefTr) #combine in one dataset
+  colnames(CombinedDF_pca)<- c("Intercept","residFat","residBill", "residCort", "residCho", "residU", "residH", "residB")
+  sim_coefTrSE[[sim_number]]<-sim_coef[[sim_number]]$Std..Error #extract se
+  CombinedDF_pcaSE<-do.call(rbind.data.frame, sim_coefTrSE) #combine in one dataset
+  colnames(CombinedDF_pcaSE)<- c("InterceptSE","residFatSE","residBillSE", "residCortSE", "residChoSE", "residUSE", "residHSE", "residBSE")
+}
+
+```
+
+## do simulation again to get energy store estimates: use cort as first reference variable
+```{r include=F}
+analyzeModel_Fat <- '
+#Bill colour
+BCol =~ HS
+
+#Energy store
+ES =~  lMS + ratio      
+lMS =~ MSK
+lMS ~ TA + TH +WL       # dont take ta because in ratio already
+lMS~~0*lMS
+
+#cond variables: regress confounding and individual variables on the different condition measures
+lCho =~ Cho_perVolBlood
+lH =~ LogitH 
+lB =~ LogitB
+lU =~ U_perVolBlood
+lCort =~ CortStd10
+lB ~ AgeN+SexN+nBH10+nHT10 
+lH ~ AgeN+SexN+nBH10+nHT10 
+lCho ~ AgeN+SexN+nBH10+nHT10 
+ES ~ AgeN+SexN+nBH10+nHT10 
+lU ~ AgeN+SexN+nBH10+nHT10 
+lCort ~ AgeN+SexN+nBH10
+BCol ~ AgeN+SexN+nBH10
+
+#composite
+Comp <~ -1*lCort+ES+BCol+lH+lB+lCho+lU  #lCho+lB+lH+ #define the composite variable with the condition variables
+LogitSurvWS ~ Comp  
+
+#add covariance structure
+lCho~~lH
+lU~~lH 
+'
+fit_Fat<-sem(analyzeModel_Fat,data=f)
+summary(fit_Fat, standardized=T)
+
+### use unstandardized estimates from model
+popModel_Fat<-'
+BCol =~ 1*HS
+
+ES =~ 1*lMS   + 10.313*ratio      
+lMS =~ 1*MSK
+lMS ~ 0.577*TA + -0.000*TH + -0.001*WL       
+
+#cond variables: regress confounding and individual variables on the different condition measures
+lCho =~ 1*Cho_perVolBlood
+lH =~ 1*LogitH 
+lB =~ 1*LogitB
+lU =~ 1*U_perVolBlood
+lCort =~ 1*CortStd10
+lB ~ -0.182*AgeN + 0.016*SexN + 0.282*nBH10 + -0.219*nHT10 
+lH ~ -0.051*AgeN + -0.005*SexN + -0.089*nBH10 + -0.038*nHT10 
+lCho ~ 0.052*AgeN + -0.034*SexN + 0.188*nBH10 + 0.468*nHT10 
+ES ~ 0.028*AgeN + -0.014*SexN + 0.009*nBH10 + -0.079*nHT10 
+lU ~ -0.051*AgeN + -0.119*SexN + -0.437*nBH10 + -0.742*nHT10 
+lCort ~ -0.049*AgeN + 0.008*SexN + 0.098*nBH10
+BCol ~ -0.026*AgeN + -0.025*SexN + 0.108*nBH10
+
+Comp <~ -1*lCort + -4.571*ES + 0.780*BCol + 0.055*lH + 0.109*lB + -0.242*lCho + -0.011*lU
+LogitSurvWS ~ 0.763*Comp  
+
+#add covariance structure
+lCho ~~ 0.016*lH
+lU ~~ 0.019*lH 
+
+# variances
+lMS ~~ 0*lMS
+'
+
+#num_sims<-1000
+set.seed(543210) #seed is necessay for reproducibility
+sim_output_unstdFat <- rep(NA, times = num_sims) #This creates a vector of 1000 NA values
+mydataFat <- list() #add var names
+sim_output_stdFat <- list()
+
+###SEM###
+for (sim_number in 1:num_sims){ #this starts your for loop
+  mydataFat[[sim_number]] <- simulateData(popModel_Fat, sample.nobs=1000L, model.type="sem")#generate your data
+  summary_Fat<-summary(sem(analyzeModel_Fat, data=mydataFat[[sim_number]]), standardized=T)
+  sim_output_unstdFat[sim_number] <- summary_Fat #this is where you store your output for each simulation
+}
+
+CombinedDF_SEMunstdFat<-do.call(rbind.data.frame, sim_output_unstdFat)
+CombinedDF_SEMunstdFat$lhs<-factor(CombinedDF_SEMunstdFat$lhs)
+CombinedDF_SEMunstdFat$rhs<-factor(CombinedDF_SEMunstdFat$rhs)
+
+###Conventional###
+library(FactoMineR)
+library(factoextra)
+
+d_Fat<-list()
+PCA_Fat_Fat<-list()
+res.pca1_Fat<-list()
+axes_Fat_Fat<-list()
+sim_output_pca_Fat<-list()
+summary_pca_Fat<-list()
+sim_coef_Fat<-list()
+sim_coefTr_Fat<-list()
+sim_coefTrSE_Fat<-list()
+
+for (sim_number in 1:num_sims) { 
+  mydataFat[[sim_number]]$residMSPCA <- resid(lm(MSK~TA+TH+WL, data=mydataFat[[sim_number]])) #+TH+WL
+  PCA_Fat_Fat[[sim_number]]<-data.frame(mydataFat[[sim_number]]$ratio, mydataFat[[sim_number]]$residMSPCA)
+  colnames(PCA_Fat_Fat[[sim_number]]) <- c("Ratio", "Residuals")
+  res.pca1_Fat[[sim_number]]<-PCA(PCA_Fat_Fat[[sim_number]], scale.unit = TRUE, ncp = 5, graph = TRUE)
+  axes_Fat_Fat[[sim_number]]<-data.frame(res.pca1_Fat[[sim_number]]$ind$coord)
+  d_Fat[[sim_number]]<- cbind(mydataFat[[sim_number]], axes_Fat_Fat[[sim_number]])
+  d_Fat[[sim_number]]$PC1_Fat<-d_Fat[[sim_number]]$Dim.1
+  #multiple regressions
+  d_Fat[[sim_number]]$residCort<-resid(lm(CortStd10~SexN+nBH10+AgeN, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residCho<-resid(lm(Cho_perVolBlood~SexN+nBH10+nHT10+AgeN, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residU<-resid(lm(U_perVolBlood~SexN+nBH10+nHT10+AgeN, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residH<-resid(lm(LogitH~SexN+nBH10+nHT10+AgeN, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residB<-resid(lm(LogitB~SexN+nBH10+nHT10+AgeN, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residFat<-resid(lm(PC1_Fat~SexN+nBH10+AgeN+nHT10, data=d_Fat[[sim_number]]))
+  d_Fat[[sim_number]]$residBill<-resid(lm(HS~SexN+nBH10+AgeN, data=d_Fat[[sim_number]]))
+  #summary effect of variables on surv
+  summary_pca_Fat[[sim_number]]<-summary(lm(LogitSurvWS~residFat+residCort+residBill+residCho+residU+residH+residB, data=d_Fat[[sim_number]]))
+  #extract variables and put into format
+  sim_coef_Fat[[sim_number]]<-data.frame(summary_pca_Fat[[sim_number]]$coefficients)
+  sim_coefTr_Fat[[sim_number]]<-sim_coef_Fat[[sim_number]]$Estimate #extract estimates
+  CombinedDF_pca_Fat<-do.call(rbind.data.frame, sim_coefTr_Fat) #combine in one dataset
+  colnames(CombinedDF_pca_Fat)<- c("Intercept","residFat","residBill", "residCort", "residCho", "residU", "residH", "residB")
+  sim_coefTrSE_Fat[[sim_number]]<-sim_coef_Fat[[sim_number]]$Std..Error #extract se
+  CombinedDF_pcaSE_Fat<-do.call(rbind.data.frame, sim_coefTrSE_Fat) #combine in one dataset
+  colnames(CombinedDF_pcaSE_Fat)<- c("InterceptSE","residFatSE","residBillSE", "residCortSE", "residChoSE", "residUSE", "residHSE", "residBSE")
+}
+```
+
+#################################################################################################################
+########################################### Simulation results ##################################################
+#################################################################################################################
+unstandardized estimates: Energy stores (ES)
+```{r include=F}
+#SEM
+summary(CombinedDF_SEMunstdFat)
+Sim_FCun<-subset(CombinedDF_SEMunstdFat, lhs=="Comp"&rhs=="ES",
+                  select=c(lhs,rhs,est, se)) 
+summary(Sim_FCun)
+hist(Sim_FCun$est)
+Sim_FCun$est10<-Sim_FCun$est/10
+hist(Sim_FCun$est10)
+
+mean(Sim_FCun$est)
+trueFCunstd_sem<--4.571/10 
+
+#conventional
+pca_FC_est<-subset(CombinedDF_pca_Fat,
+                         select=c(residFat))
+summary(pca_FC_est$residFat)
+pca_FC_est$residFat10<-pca_FC_est$residFat/10
+mean(pca_FC_est$residFat)
+trueFC_pca<--4.571/10
+```
+
+unstandardized estimates: Cort
+```{r include=F}
+#sem
+summary(CombinedDF_SEMunstd)
+Sim_Cortun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="lCort",
+                  select=c(lhs,rhs,est, se)) 
+summary(Sim_Cortun)
+
+mean(Sim_Cortun$est)
+mean(Sim_Cortun$se)
+sd(Sim_Cortun$est) 
+trueCortunstd_sem<--0.219 
+
+#conventional
+summary(CombinedDF_pca)
+summary(CombinedDF_pcaSE)
+
+pca_Cort_est<-subset(CombinedDF_pca,
+                         select=c(residCort))
+head(pca_Cort_est)
+pca_Cort_se<-subset(CombinedDF_pcaSE,
+                         select=c(residCortSE))
+mean(pca_Cort_est$residCort)
+trueCort_pca<--0.219
+```
+
+unstandardized estimates: BCol
+```{r include=F}
+#sem
+Sim_BColun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="BCol",
+                  select=c(lhs,rhs,est, se)) 
+mean(Sim_BColun$est) 
+mean(Sim_BColun$se) 
+sd(Sim_BColun$est) 
+trueBColunstd_sem<-0.171
+
+#conventional
+pca_Bill_est<-subset(CombinedDF_pca,
+                         select=c(residBill))
+mean(pca_Bill_est$residBill)
+trueBill_pca<-0.171
+```
+
+unstandardized estimates: Cho
+```{r include=F}
+#sem
+Sim_Choun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="lCho",
+                  select=c(lhs,rhs,est, se)) 
+
+mean(Sim_Choun$est) 
+mean(Sim_Choun$se)
+sd(Sim_Choun$est) 
+trueChounstd_sem<--0.053
+
+#conventional
+pca_Cho_est<-subset(CombinedDF_pca,
+                         select=c(residCho))
+head(pca_Cho_est)
+pca_Cho_se<-subset(CombinedDF_pcaSE,
+                         select=c(residChoSE))
+mean(pca_Cho_est$residCho)
+trueCho_pca<--0.053
+```
+
+unstandardized estimates: U
+```{r include=F}
+#sem
+Sim_Uun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="lU",
+                  select=c(lhs,rhs,est, se)) 
+
+mean(Sim_Uun$est)
+mean(Sim_Uun$se)
+sd(Sim_Uun$est) 
+trueUunstd_sem<--0.002
+
+#conventional
+pca_U_est<-subset(CombinedDF_pca,
+                         select=c(residU))
+pca_U_se<-subset(CombinedDF_pcaSE,
+                         select=c(residUSE))
+mean(pca_U_est$residU)
+trueU_pca<--0.002
+```
+
+unstandardized estimates: B
+```{r include=F}
+#sem
+Sim_Bun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="lB",
+                  select=c(lhs,rhs,est, se)) 
+
+mean(Sim_Bun$est) 
+mean(Sim_Bun$se) 
+sd(Sim_Bun$est) 
+trueBunstd_sem<-0.024
+
+#conventional
+pca_B_est<-subset(CombinedDF_pca,
+                         select=c(residB))
+pca_B_se<-subset(CombinedDF_pcaSE,
+                         select=c(residBSE))
+mean(pca_B_est$residB) 
+trueB_pca<-0.024
+```
+
+unstandardized estimates: H
+```{r include=F}
+#sem
+Sim_Hun<-subset(CombinedDF_SEMunstd, lhs=="Comp"&rhs=="lH",
+                  select=c(lhs,rhs,est, se)) 
+
+mean(Sim_Hun$est) 
+mean(Sim_Hun$se) 
+sd(Sim_Hun$est) 
+trueHunstd_sem<-0.012
+
+#conventional
+pca_H_est<-subset(CombinedDF_pca,
+                         select=c(residH))
+pca_H_se<-subset(CombinedDF_pcaSE,
+                         select=c(residHSE))
+mean(pca_H_est$residH)
+trueH_pca<-0.012
+```
+
+Calculate the bias
+```{r include=F}
+################################### SEM ###############################################################
+#FC=ES
+Sim_FCun$AbsBiasPerSim<-(Sim_FCun$est10-trueFCunstd_sem)
+#Cort
+Sim_Cortun$AbsBiasPerSim<-(Sim_Cortun$est-trueCortunstd_sem)
+#U
+Sim_Uun$AbsBiasPerSim<-(Sim_Uun$est-trueUunstd_sem) 
+#Cho
+Sim_Choun$AbsBiasPerSim<-(Sim_Choun$est-trueChounstd_sem)
+#H
+Sim_Hun$AbsBiasPerSim<-(Sim_Hun$est-trueHunstd_sem)
+#B
+Sim_Bun$AbsBiasPerSim<-(Sim_Bun$est-trueBunstd_sem) 
+#BCol
+Sim_BColun$AbsBiasPerSim<-(Sim_BColun$est-trueBColunstd_sem)
+
+##################################################### Conventional #########################################
+#FC=ES
+pca_FC_est$AbsBiasPerSim<-(pca_FC_est$residFat10-trueFC_pca)
+#Cort
+pca_Cort_est$AbsBiasPerSim<-(pca_Cort_est$residCort-trueCort_pca)
+#Bill
+pca_Bill_est$AbsBiasPerSim<-(pca_Bill_est$residBill-trueBill_pca)
+#Cho
+pca_Cho_est$AbsBiasPerSim<-(pca_Cho_est$residCho-trueCho_pca)
+#U
+pca_U_est$AbsBiasPerSim<-(pca_U_est$residU-trueU_pca)
+#B
+pca_B_est$AbsBiasPerSim<-(pca_B_est$residB-trueB_pca)
+#H
+pca_H_est$AbsBiasPerSim<-(pca_H_est$residH-trueH_pca)
+```
+
+Calculate precision berekenen (+SD) (as described in Morris et al., 2019)
+```{r include=F}
+########## SEM ###############
+#FC
+Sim_FCun$BiasPerRowSqrt<-(Sim_FCun$est10-(mean(Sim_FCun$est10)))^2
+EmpSE_FC_sem<-(sqrt((1/(num_sims-1))*(sum(Sim_FCun$BiasPerRowSqrt)))) #empirical standard error
+SEEmpSE_FC_sem<-EmpSE_FC_sem/(sqrt(2*(num_sims-1))) #sd of empirical standard error
+
+#cort
+Sim_Cortun$BiasPerRowSqrt<-(Sim_Cortun$est-(mean(Sim_Cortun$est)))^2
+EmpSE_Cort_sem<-(sqrt((1/(num_sims-1))*(sum(Sim_Cortun$BiasPerRowSqrt)))) 
+SEEmpSE_Cort_sem<-EmpSE_Cort_sem/(sqrt(2*(num_sims-1))) 
+
+#Bill colour
+Sim_BColun$BiasPerRowSqrt<-(Sim_BColun$est-(mean(Sim_BColun$est)))^2
+EmpSE_BCol_sem<-(sqrt((1/(num_sims-1))*(sum(Sim_BColun$BiasPerRowSqrt)))) 
+SEEmpSE_BCol_sem<-EmpSE_BCol_sem/(sqrt(2*(num_sims-1))) 
+
+#U
+Sim_Uun$BiasPerRowSqrt<-(Sim_Uun$est-(mean(Sim_Uun$est)))^2
+EmpSE_U_sem<-(sqrt((1/(num_sims-1))*sum(Sim_Uun$BiasPerRowSqrt))) 
+SEEmpSE_U_sem<-EmpSE_U_sem/(sqrt(2*(num_sims-1)))
+
+#Cho
+Sim_Choun$BiasPerRowSqrt<-(Sim_Choun$est-(mean(Sim_Choun$est)))^2
+EmpSE_Cho_sem<-(sqrt((1/(num_sims-1))*sum(Sim_Choun$BiasPerRowSqrt)))
+SEEmpSE_Cho_sem<-EmpSE_Cho_sem/(sqrt(2*(num_sims-1))) 
+CIEmpSE_Cho_sem<-1.96*SEEmpSE_Cho_sem 
+
+#H
+Sim_Hun$BiasPerRowSqrt<-(Sim_Hun$est-(mean(Sim_Hun$est)))^2
+EmpSE_H_sem<-(sqrt((1/(num_sims-1))*sum(Sim_Hun$BiasPerRowSqrt)))
+SEEmpSE_H_sem<-EmpSE_U_sem/(sqrt(2*(num_sims-1))) 
+
+#B
+Sim_Bun$BiasPerRowSqrt<-(Sim_Bun$est-(mean(Sim_Bun$est)))^2
+EmpSE_B_sem<-(sqrt((1/(num_sims-1))*sum(Sim_Bun$BiasPerRowSqrt)))
+SEEmpSE_B_sem<-EmpSE_B_sem/(sqrt(2*(num_sims-1)))
+
+############### Conventional ####################
+#FC
+pca_FC_est$BiasPerRowSqrt<-(pca_FC_est$residFat10-(mean(pca_FC_est$residFat10)))^2
+EmpSE_FC_pca<-(sqrt((1/(num_sims-1))*(sum(pca_FC_est$BiasPerRowSqrt)))) 
+SEEmpSE_FC_pca<-EmpSE_FC_pca/(sqrt(2*(num_sims-1))) 
+
+#Cort
+pca_Cort_est$BiasPerRowSqrt<-(pca_Cort_est$residCort-(mean(pca_Cort_est$residCort)))^2
+EmpSE_Cort_pca<-(sqrt((1/(num_sims-1))*(sum(pca_Cort_est$BiasPerRowSqrt))))
+SEEmpSE_Cort_pca<-EmpSE_Cort_pca/(sqrt(2*(num_sims-1))) 
+
+#Bill
+pca_Bill_est$BiasPerRowSqrt<-(pca_Bill_est$residBill-(mean(pca_Bill_est$residBill)))^2
+EmpSE_Bill_pca<-(sqrt((1/(num_sims-1))*(sum(pca_Bill_est$BiasPerRowSqrt)))) 
+SEEmpSE_Bill_pca<-EmpSE_Bill_pca/(sqrt(2*(num_sims-1))) 
+
+#cho
+pca_Cho_est$BiasPerRowSqrt<-(pca_Cho_est$residCho-(mean(pca_Cho_est$residCho)))^2
+EmpSE_Cho_pca<-(sqrt((1/(num_sims-1))*(sum(pca_Cho_est$BiasPerRowSqrt)))) 
+SEEmpSE_Cho_pca<-EmpSE_Cho_pca/(sqrt(2*(num_sims-1))) 
+
+#U
+pca_U_est$BiasPerRowSqrt<-(pca_U_est$residU-(mean(pca_U_est$residU)))^2
+EmpSE_U_pca<-(sqrt((1/(num_sims-1))*(sum(pca_U_est$BiasPerRowSqrt)))) 
+SEEmpSE_U_pca<-EmpSE_U_pca/(sqrt(2*(num_sims-1))) 
+
+#H
+pca_H_est$BiasPerRowSqrt<-(pca_H_est$residH-(mean(pca_H_est$residH)))^2
+EmpSE_H_pca<-(sqrt((1/(num_sims-1))*(sum(pca_H_est$BiasPerRowSqrt)))) 
+SEEmpSE_H_pca<-EmpSE_H_pca/(sqrt(2*(num_sims-1))) 
+
+#B
+pca_B_est$BiasPerRowSqrt<-(pca_B_est$residB-(mean(pca_B_est$residB)))^2
+EmpSE_B_pca<-(sqrt((1/(num_sims-1))*(sum(pca_B_est$BiasPerRowSqrt))))
+SEEmpSE_B_pca<-EmpSE_B_pca/(sqrt(2*(num_sims-1))) 
+```
+
+Fig. 7: Bias and precision plot
+```{r include=F}
+Precision<-c(EmpSE_FC_sem, EmpSE_FC_pca,
+                 EmpSE_Cort_sem, EmpSE_Cort_pca,
+                 EmpSE_BCol_sem, EmpSE_Bill_pca,
+                 EmpSE_Cho_sem, EmpSE_Cho_pca,
+                 EmpSE_U_sem, EmpSE_U_pca,
+                 EmpSE_H_sem, EmpSE_H_pca,
+                 EmpSE_B_sem, EmpSE_B_pca)
+Estimate<-c(mean(Sim_FCun$est10), (mean(pca_FC_est$residFat10)),
+            mean(Sim_Cortun$est), (mean(pca_Cort_est$residCort)), 
+            mean(Sim_BColun$est),(mean(pca_Bill_est$residBill)), 
+            mean(Sim_Choun$est), (mean(pca_Cho_est$residCho)), 
+            mean(Sim_Uun$est), (mean(pca_U_est$residU)), 
+            mean(Sim_Hun$est), (mean(pca_H_est$residH)),  
+            mean(Sim_Bun$est), (mean(pca_B_est$residB)))
+Variable<-c("Energy store", "Energy store",
+            "Corticosterone","Corticosterone", 
+            "Bill colour","Bill colour", 
+            "Cholesterol", "Cholesterol", 
+            "Uric acid","Uric acid",
+            "Haematocrit", "Haematocrit", 
+            "Buffy coat", "Buffy coat")
+Method<-c("SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional",
+          "SEM","Conventional", 
+          "SEM","Conventional")
+
+BiasPrecDF<-data.frame(Precision, Estimate, Variable, Method)
+
+BiasPrecDF_Fig8<-subset(BiasPrecDF, Variable=="Energy store" | Variable=="Corticosterone"| 
+                        Variable=="Bill colour" | Variable=="Cholesterol")
+str(BiasPrecDF_Fig8)
+BiasPrecDF_Fig8$Variable<-factor(BiasPrecDF_Fig8$Variable, levels = c("Energy store", "Corticosterone","Bill colour",
+                                 "Cholesterol"))
+BiasPrecision<-ggplot(BiasPrecDF_Fig8)+
+  ylim(-0.6,0.45)+
+   scale_x_discrete(drop=FALSE)+
+   geom_segment(aes(x = 3.8, y = trueChounstd_sem, xend = 4.2, yend = trueChounstd_sem),color="grey",cex=1.5, linetype="solid")+
+  geom_segment(aes(x = 0.8, y = trueFCunstd_sem, xend = 1.2, yend = trueFCunstd_sem),color="grey",cex=1.5, linetype="solid")+
+  geom_segment(aes(x = 1.8, y = trueCortunstd_sem, xend = 2.2, yend = trueCortunstd_sem),color="grey",cex=1.5, linetype="solid")+
+  geom_segment(aes(x = 2.8, y = trueBColunstd_sem, xend = 3.2, yend = trueBColunstd_sem),color="grey",cex=1.5, linetype="solid")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3.8, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.1, size=1.2,
+                position=position_dodge(width=0.25))+
+  labs(x="Condition variable", y = "Simulated estimate (± empirical SE)")+
+  theme(axis.text=element_text(size=17),
+        axis.title=element_text(size=18),
+        legend.title = element_text(size = 17),
+        legend.text = element_text(size = 15),
+        legend.position = "top",
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)))
+BiasPrecision
+
+png("Fig.7.png", width = 7000, height = 4500,units = 'px', res = 600)
+BiasPrecision
+dev.off()
+```
+
+##################################################################################################################################
+######################################## Supplementary information ############################################################### ##################################################################################################################################
+
+Plot precision(Fig. S20)
+```{r include=F}
+PrecisionMean<-c(EmpSE_FC_sem, EmpSE_FC_pca,
+                 EmpSE_Cort_sem, EmpSE_Cort_pca,
+                 EmpSE_BCol_sem, EmpSE_Bill_pca,
+                 EmpSE_Cho_sem, EmpSE_Cho_pca,
+                 EmpSE_U_sem, EmpSE_U_pca,
+                 EmpSE_H_sem, EmpSE_H_pca,
+                 EmpSE_B_sem, EmpSE_B_pca)
+SD<-c(SEEmpSE_FC_sem, SEEmpSE_FC_pca,
+      SEEmpSE_Cort_sem, SEEmpSE_Cort_pca,
+      SEEmpSE_BCol_sem, SEEmpSE_Bill_pca,
+      SEEmpSE_Cho_sem, SEEmpSE_Cho_pca,
+      SEEmpSE_U_sem, SEEmpSE_U_pca,
+      SEEmpSE_H_sem, SEEmpSE_H_pca,
+      SEEmpSE_B_sem, SEEmpSE_B_pca)
+Variable<-c("Energy store*", "Energy store*",
+            "Corticosterone*","Corticosterone*", 
+            "Bill colour","Bill colour", 
+            "Cholesterol", "Cholesterol", 
+            "Uric acid","Uric acid",
+            "Haematocrit", "Haematocrit", 
+            "Buffy coat", "Buffy coat")
+Method<-c("SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional",
+          "SEM","Conventional", 
+          "SEM","Conventional")
+
+PrecPlot <- data.frame(PrecisionMean, SD,Variable, Method)
+
+PrecisionPlot<-ggplot(PrecPlot)+
+  geom_point(aes(Variable, PrecisionMean, colour=Method, shape=Method), cex=3)+
+  labs(y = "Empirical standard error", x="")
+PrecisionPlot
+
+png("Fig.S20.png", width = 7000, height = 4500,units = 'px', res = 600)
+PrecisionPlot
+dev.off()
+```
+
+Absolute bias plot (Fig. S18)
+```{r include=F}
+BiasMean<-c(mean(Sim_FCun$AbsBiasPerSim), (mean(pca_FC_est$AbsBiasPerSim)),
+            mean(Sim_Cortun$AbsBiasPerSim), (mean(pca_Cort_est$AbsBiasPerSim)), 
+            mean(Sim_BColun$AbsBiasPerSim),(mean(pca_Bill_est$AbsBiasPerSim)), 
+            mean(Sim_Choun$AbsBiasPerSim), (mean(pca_Cho_est$AbsBiasPerSim)), 
+            mean(Sim_Uun$AbsBiasPerSim), (mean(pca_U_est$AbsBiasPerSim)), 
+            mean(Sim_Hun$AbsBiasPerSim), (mean(pca_H_est$AbsBiasPerSim)),  
+            mean(Sim_Bun$AbsBiasPerSim), (mean(pca_B_est$AbsBiasPerSim)))
+BiasSD<-c(sd(Sim_FCun$AbsBiasPerSim), (sd(pca_FC_est$AbsBiasPerSim)),
+            sd(Sim_Cortun$AbsBiasPerSim), (sd(pca_Cort_est$AbsBiasPerSim)), 
+            sd(Sim_BColun$AbsBiasPerSim),(sd(pca_Bill_est$AbsBiasPerSim)), 
+            sd(Sim_Choun$AbsBiasPerSim), (sd(pca_Cho_est$AbsBiasPerSim)), 
+            sd(Sim_Uun$AbsBiasPerSim), (sd(pca_U_est$AbsBiasPerSim)), 
+            sd(Sim_Hun$AbsBiasPerSim), (sd(pca_H_est$AbsBiasPerSim)),  
+            sd(Sim_Bun$AbsBiasPerSim), (sd(pca_B_est$AbsBiasPerSim)))
+BiasUCI<-c(quantile(Sim_FCun$AbsBiasPerSim, .975), quantile(pca_FC_est$AbsBiasPerSim, .975) ,
+           quantile(Sim_Cortun$AbsBiasPerSim, .975), quantile(pca_Cort_est$AbsBiasPerSim, .975), 
+           quantile(Sim_BColun$AbsBiasPerSim, .975),quantile(pca_Bill_est$AbsBiasPerSim, .975), 
+           quantile(Sim_Choun$AbsBiasPerSim, .975), quantile(pca_Cho_est$AbsBiasPerSim, .975), 
+           quantile(Sim_Uun$AbsBiasPerSim, .975), quantile(pca_U_est$AbsBiasPerSim, .975), 
+           quantile(Sim_Hun$AbsBiasPerSim, .975), quantile(pca_H_est$AbsBiasPerSim, .975),  
+           quantile(Sim_Bun$AbsBiasPerSim, .975), quantile(pca_B_est$AbsBiasPerSim, .975))
+BiasLCI<-c(quantile(Sim_FCun$AbsBiasPerSim, .025), quantile(pca_FC_est$AbsBiasPerSim, .025), 
+           quantile(Sim_Cortun$AbsBiasPerSim, .025), quantile(pca_Cort_est$AbsBiasPerSim, .025),
+           quantile(Sim_BColun$AbsBiasPerSim, .025),quantile(pca_Bill_est$AbsBiasPerSim, .025), 
+           quantile(Sim_Choun$AbsBiasPerSim, .025), quantile(pca_Cho_est$AbsBiasPerSim, .025), 
+           quantile(Sim_Uun$AbsBiasPerSim, .025), quantile(pca_U_est$AbsBiasPerSim, .025), 
+           quantile(Sim_Hun$AbsBiasPerSim, .025), quantile(pca_H_est$AbsBiasPerSim, .025),  
+           quantile(Sim_Bun$AbsBiasPerSim, .025), quantile(pca_B_est$AbsBiasPerSim, .025))
+Variable<-c("Energy store", "Energy store",
+            "Corticosterone","Corticosterone", 
+            "Bill colour","Bill colour", 
+            "Cholesterol", "Cholesterol", 
+            "Uric acid","Uric acid",
+            "Haematocrit", "Haematocrit", 
+            "Buffy coat", "Buffy coat")
+Method<-c("SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional",
+          "SEM","Conventional", 
+          "SEM","Conventional")
+
+BiasPlotDF <- data.frame(BiasMean, BiasSD, BiasUCI,BiasLCI, Variable, Method)
+
+BiasPlot<-ggplot(BiasPlotDF)+
+  geom_hline(yintercept =0, color="grey")+
+  geom_point(aes(Variable, BiasMean, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.5))+
+  labs(y = "Absolute Bias", x="")
+
+png("Fig.S18.png", width = 7000, height = 4500,units = 'px', res = 600)
+BiasPlot
+dev.off()
+```
+
+Bias Precision plot for supplements with all condition variables (Fig. S17)
+```{r include=F}
+#FC
+BiasPrecDF_FC<-subset(BiasPrecDF, Variable=="Energy store")
+BiasPrecision_FC<-ggplot(BiasPrecDF_FC)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueFCunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(x=Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "Simulated estimate \n(± empirical SE)")+
+      theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_FC
+
+#Cort
+BiasPrecDF_Cort<-subset(BiasPrecDF, Variable=="Corticosterone")
+BiasPrecision_Cort<-ggplot(BiasPrecDF_Cort)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueCortunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "")+
+      theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_Cort
+
+#BCol
+BiasPrecDF_BCol<-subset(BiasPrecDF, Variable=="Bill colour")
+BiasPrecision_BCol<-ggplot(BiasPrecDF_BCol)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueBColunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "")+
+      theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_BCol
+
+#Cho
+BiasPrecDF_Cho<-subset(BiasPrecDF, Variable=="Cholesterol")
+BiasPrecision_Cho<-ggplot(BiasPrecDF_Cho)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueChounstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "")+
+      theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_Cho
+
+#U
+BiasPrecDF_U<-subset(BiasPrecDF, Variable=="Uric acid")
+BiasPrecision_U<-ggplot(BiasPrecDF_U)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueUunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "Simulated estimate \n(± empirical SE)")+
+  theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16)
+        )
+BiasPrecision_U
+
+#H
+BiasPrecDF_H<-subset(BiasPrecDF, Variable=="Haematocrit")
+BiasPrecision_H<-ggplot(BiasPrecDF_H)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueHunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "")+
+    theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_H
+
+#B
+BiasPrecDF_B<-subset(BiasPrecDF, Variable=="Buffy coat")
+BiasPrecision_B<-ggplot(BiasPrecDF_B)+
+  ylim(-0.6,0.45)+
+  geom_hline(yintercept =trueBunstd_sem, color="grey",cex=2, linetype="dashed")+
+  geom_point(aes(Variable, Estimate, colour=Method, shape=Method), cex=3, position=position_dodge(width=0.25))+
+  geom_errorbar(aes(x=Variable, ymin=Estimate-Precision, ymax=Estimate+Precision, color=Method), width=0.05, size=1,
+                position=position_dodge(width=0.25))+
+  labs(x="", y = "")+
+    theme(panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93"),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.position="top",
+        legend.title = element_text(size=18),
+        legend.text = element_text(size=16))
+BiasPrecision_B
+
+p0<-ggplot()+theme_void()
+
+BiasPrecisionSuppl<-ggarrange(BiasPrecision_FC, BiasPrecision_Cort, BiasPrecision_BCol,BiasPrecision_Cho,
+          BiasPrecision_U,BiasPrecision_H, BiasPrecision_B, p0,
+          ncol=4, nrow=2, common.legend=T, legend="top")
+
+png("Fig.S17.png", width = 7000, height = 4500,units = 'px', res = 600)
+BiasPrecisionSuppl
+dev.off()
+```
+
+
+Relative bias for significant variables (as calculated in Araya‐Ajoy et al., 2019) (Fig. S16)
+```{r include=F}
+#SEM
+#FC
+Sim_FCun$RelBiasPerSim<-(mean(Sim_FCun$AbsBiasPerSim)/Sim_FCun$est10)*100 #mean deviation/simulated value per row=relative bias
+quantile(Sim_FCun$RelBiasPerSim, .975) 
+quantile(Sim_FCun$RelBiasPerSim, .025) 
+
+#Cort
+Sim_Cortun$RelBiasPerSim<-(mean(Sim_Cortun$AbsBiasPerSim)/Sim_Cortun$est)*100 #mean deviation/simulated value per row=relative bias
+quantile(Sim_Cortun$RelBiasPerSim, .975) 
+quantile(Sim_Cortun$RelBiasPerSim, .025) 
+
+#BCol
+Sim_BColun$RelBiasPerSim<-(mean(Sim_BColun$AbsBiasPerSim)/Sim_BColun$est)*100 #mean deviation/simulated value per row=relative bias
+quantile(Sim_BColun$RelBiasPerSim, .975) 
+quantile(Sim_BColun$RelBiasPerSim, .025) 
+
+#PCA
+#FC
+pca_FC_est$RelBiasPerSim<-(mean(pca_FC_est$AbsBiasPerSim)/pca_FC_est$residFat10)*100 
+quantile(pca_FC_est$RelBiasPerSim, .975) #95% confidence interval
+quantile(pca_FC_est$RelBiasPerSim, .025) #95% confidence interval
+
+#Cort
+pca_Cort_est$RelBiasPerSim<-(mean(pca_Cort_est$AbsBiasPerSim)/pca_Cort_est$residCort)*100 
+quantile(pca_Cort_est$RelBiasPerSim, .975) #95% confidence interval
+quantile(pca_Cort_est$RelBiasPerSim, .025) #95% confidence interval 
+
+#BCol
+pca_Bill_est$RelBiasPerSim<-(mean(pca_Bill_est$AbsBiasPerSim)/pca_Bill_est$residBill)*100 
+quantile(pca_Bill_est$RelBiasPerSim, .975) #95% confidence interval
+quantile(pca_Bill_est$RelBiasPerSim, .025) #95% confidence interval 
+
+#relative bias
+RelBias<-c(mean(Sim_FCun$RelBiasPerSim), (mean(pca_FC_est$RelBiasPerSim)),
+            mean(Sim_Cortun$RelBiasPerSim), (mean(pca_Cort_est$RelBiasPerSim)), 
+            mean(Sim_BColun$RelBiasPerSim),(mean(pca_Bill_est$RelBiasPerSim)))
+BiasUCI<-c(quantile(Sim_FCun$RelBiasPerSim, .975), quantile(pca_FC_est$RelBiasPerSim, .975) , 
+          quantile(Sim_Cortun$RelBiasPerSim, .975), quantile(pca_Cort_est$RelBiasPerSim, .975) , 
+           quantile(Sim_BColun$RelBiasPerSim, .975),quantile(pca_Bill_est$RelBiasPerSim, .975))
+BiasLCI<-c(quantile(Sim_FCun$RelBiasPerSim, .025), quantile(pca_FC_est$RelBiasPerSim, .025),
+           quantile(Sim_Cortun$RelBiasPerSim, .025), quantile(pca_Cort_est$RelBiasPerSim, .025) , 
+           quantile(Sim_BColun$RelBiasPerSim, .025),quantile(pca_Bill_est$RelBiasPerSim, .025))
+Variable<-c("Energy store","Energy store",
+            "Corticosterone","Corticosterone", 
+            "Bill colour","Bill colour")
+Method<-c("SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional")
+
+RelBiasPlotDF <- data.frame(RelBias, BiasUCI,BiasLCI, Variable, Method)
+
+RelBiasPlot<-ggplot(RelBiasPlotDF)+
+  geom_point(aes(Variable, RelBias, colour=Method, shape=Method), cex=5)+
+  geom_errorbar(data=RelBiasPlotDF, mapping=aes(x=Variable, ymin=BiasLCI, ymax=BiasUCI, color=Method), width=0.1, size=1.5)+
+  theme(axis.text=element_text(size=24),
+        axis.title=element_text(size=26),
+        legend.position="top",
+        legend.title = element_text(size=26),
+        legend.text = element_text(size=24),
+        panel.background = element_rect(fill = "white",
+                                colour = "grey",
+                                size = 0.5, linetype = "solid"),
+        panel.grid.major = element_line(size = 0.3, linetype = 'solid',
+                                colour = "gray93"),
+        panel.grid.minor = element_line(size = 0.1, linetype = 'solid',
+                                colour = "gray93")
+        )+
+  labs(y = "% relative bias (± 95% CI)", x="")
+
+RelBiasPlot
+
+png("Fig.S16.png", width = 7000, height = 4500,units = 'px', res = 600)
+RelBiasPlot
+dev.off()
+```
+
+Plot precision (Fig. S20)
+```{r include=F}
+PrecisionMean<-c(EmpSE_FC_sem, EmpSE_FC_pca,
+                 EmpSE_Cort_sem, EmpSE_Cort_pca,
+                 EmpSE_BCol_sem, EmpSE_Bill_pca,
+                 EmpSE_Cho_sem, EmpSE_Cho_pca,
+                 EmpSE_U_sem, EmpSE_U_pca,
+                 EmpSE_H_sem, EmpSE_H_pca,
+                 EmpSE_B_sem, EmpSE_B_pca)
+SD<-c(SEEmpSE_FC_sem, SEEmpSE_FC_pca,
+      SEEmpSE_Cort_sem, SEEmpSE_Cort_pca,
+      SEEmpSE_BCol_sem, SEEmpSE_Bill_pca,
+      SEEmpSE_Cho_sem, SEEmpSE_Cho_pca,
+      SEEmpSE_U_sem, SEEmpSE_U_pca,
+      SEEmpSE_H_sem, SEEmpSE_H_pca,
+      SEEmpSE_B_sem, SEEmpSE_B_pca)
+Variable<-c("Energy store*", "Energy store*",
+            "Corticosterone*","Corticosterone*", 
+            "Bill colour","Bill colour", 
+            "Cholesterol", "Cholesterol", 
+            "Uric acid","Uric acid",
+            "Haematocrit", "Haematocrit", 
+            "Buffy coat", "Buffy coat")
+Method<-c("SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional", 
+          "SEM","Conventional",
+          "SEM","Conventional", 
+          "SEM","Conventional")
+
+PrecPlot <- data.frame(PrecisionMean, SD,Variable, Method)
+
+PrecisionPlot<-ggplot(PrecPlot)+
+  geom_point(aes(Variable, PrecisionMean, colour=Method, shape=Method), cex=3)+
+  labs(y = "Empirical standard error", x="")#+geom_jitter(aes(Variable, BiasMean, colour=Method, shape=Method))
+PrecisionPlot
+
+png("Fig.S20.png", width = 7000, height = 4500,units = 'px', res = 600)
+PrecisionPlot
+dev.off()
+```
+
+Plot bias & precision (Fig. S19) 
+```{r include=F}
+BiasMean<-c(mean(Sim_FCun$AbsBiasPerSim)*100, (mean(pca_FC_est$AbsBiasPerSim))*100,
+            mean(Sim_Cortun$AbsBiasPerSim)*100, (mean(pca_Cort_est$AbsBiasPerSim))*100, 
+            mean(Sim_BColun$AbsBiasPerSim)*100,(mean(pca_Bill_est$AbsBiasPerSim))*100, 
+            mean(Sim_Choun$AbsBiasPerSim)*100, (mean(pca_Cho_est$AbsBiasPerSim))*100, 
+            mean(Sim_Uun$AbsBiasPerSim)*100, (mean(pca_U_est$AbsBiasPerSim))*100, 
+            mean(Sim_Hun$AbsBiasPerSim)*100, (mean(pca_H_est$AbsBiasPerSim))*100,  
+            mean(Sim_Bun$AbsBiasPerSim)*100, (mean(pca_B_est$AbsBiasPerSim))*100)
+BiasPrecDF<-data.frame(PrecisionMean, BiasMean, Variable, Method)
+
+BiasPrecisionPlot<-ggplot(BiasPrecDF)+
+  geom_point(aes(BiasMean, PrecisionMean, colour=Method, shape=Method), cex=3)+
+  labs(x="Bias (%)", y = "Empirical standard error")#+geom_jitter(aes(Variable, BiasMean, colour=Method, shape=Method))
+BiasPrecisionPlot
+
+png("Fig.S19.png", width = 7000, height = 4500,units = 'px', res = 600)
+BiasPrecisionPlot
+dev.off()
+```
+
+Histogram bias SEM (Fig. S14)
+```{r include= F}
+#FC
+p_FC<-ggplot(Sim_FCun, aes(x=est10)) +
+  geom_histogram(binwidth=0.02)+
+  geom_vline(aes(xintercept=trueFCunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_FCun, aes(xintercept=mean(est10)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Energy store on condition") + ylab("Frequency")
+p_FC
+
+#cort
+p_Cort<-ggplot(Sim_Cortun, aes(x=est)) +
+  geom_histogram(binwidth=0.04)+
+  geom_vline(aes(xintercept=trueCortunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_Cortun,aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Corticosterone on condition") + ylab("")
+p_Cort
+
+#Bcol
+p_BCol<-ggplot(Sim_BColun, aes(x=est)) +
+  geom_histogram(binwidth=0.02)+
+  geom_vline(aes(xintercept=trueBColunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_BColun, aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Bill colour on condition") + ylab("")
+p_BCol
+
+#U
+p_U<-ggplot(Sim_Uun, aes(x=est)) +
+  geom_histogram(binwidth=0.03)+
+  geom_vline(aes(xintercept=trueUunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_Uun, aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Uric acid on condition") + ylab("")
+p_U
+
+#cho
+p_Cho<-ggplot(Sim_Choun, aes(x=est)) +
+  geom_histogram(binwidth=0.02)+
+  geom_vline(aes(xintercept=trueChounstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_Choun, aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Cholesterol on condition") + ylab("Frequency")
+p_Cho
+
+#h
+p_H<-ggplot(Sim_Hun, aes(x=est)) +
+  geom_histogram(binwidth=0.02)+
+  geom_vline(aes(xintercept=trueHunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_Hun, aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Haematocrit on condition") + ylab("")
+p_H
+
+#B
+p_B<-ggplot(Sim_Bun, aes(x=est)) +
+  geom_histogram(binwidth=0.02)+
+  geom_vline(aes(xintercept=trueBunstd_sem),linetype="dashed", color="red", size=3)+
+  geom_vline(data=Sim_Bun, aes(xintercept=mean(est)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Buffy coat on condition") + ylab("")
+p_B
+```
+
+Summarize histogram bias SEM in one plot (Fig. S14)
+```{r echo=F}
+p0<-ggplot()+theme_void()
+
+png("Fig.S14.png", width = 7300, height = 4373,units = 'px', res = 600)
+(p_FC/p_Cho|p_Cort/p_H|p_BCol/p_B|p_U/p0)
+grid.text("a)", x = unit(0.02, "npc"), y = unit(0.97, "npc"))
+grid.text("b)", x = unit(0.28, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("c)", x = unit(0.52, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("d)", x = unit(0.77, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("e)", x = unit(0.02, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+grid.text("f)", x = unit(0.28, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+grid.text("g)", x = unit(0.52, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+dev.off()
+```
+
+Histogram bias comventional approach (Fig. S15)
+```{r inclide=F}
+#FC
+p_FC_pca<-ggplot(pca_FC_est, aes(x=residFat)) +
+  #xlim(-5,1)+
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueFC_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_FC_est, aes(xintercept=mean(residFat)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Energy store on condition") + ylab("Frequency")
+p_FC_pca
+
+#cort
+p_Cort_pca<-ggplot(pca_Cort_est, aes(x=residCort)) +
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueCort_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_Cort_est, aes(xintercept=mean(residCort)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Corticosterone on condition") + ylab("")
+p_Cort_pca
+
+#Bill
+p_Bill_pca<-ggplot(pca_Bill_est, aes(x=residBill)) +
+  #xlim(-10,10)+
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueBill_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_Bill_est, aes(xintercept=mean(residBill)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Bill colour on condition") + ylab("")
+p_Bill_pca
+
+#U
+p_U_pca<-ggplot(pca_U_est, aes(x=residU)) +
+  #xlim(-10,10)+
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueU_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_U_est, aes(xintercept=mean(residU)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Uric acid on condition") + ylab("")
+p_U_pca
+
+#cho
+p_Cho_pca<-ggplot(pca_Cho_est, aes(x=residCho)) +
+  #xlim(-10,10)+
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueCho_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_Cho_est, aes(xintercept=mean(residCho)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Cholesterol on condition") + ylab("Frequency")
+p_Cho_pca
+
+#H
+p_H_pca<-ggplot(pca_H_est, aes(x=residH)) +
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueH_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_H_est, aes(xintercept=mean(residH)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Haematocrit on condition") + ylab("")
+p_H_pca
+
+#B
+p_B_pca<-ggplot(pca_B_est, aes(x=residB)) +
+  #xlim(-10,10)+
+  geom_histogram(aes(),binwidth=0.01)+#aes(y = stat(density)))+#(binwidth=0.05)+
+  geom_vline(aes(xintercept=trueB_pca),linetype="dashed", color="red", size=3)+
+  geom_vline(data=pca_B_est, aes(xintercept=mean(residB)),linetype="dotted", color="blue", size=1.5)+
+  xlab("Estimate: Buffy coat on condition") + ylab("")
+p_B_pca
+```
+
+Summarize bias histigram conventional approach (Fig. S15)
+```{r echo=F}
+p0<-ggplot()+theme_void()
+
+#standardized 
+png("Fig.S15.png", width = 7300, height = 4373,units = 'px', res = 600)
+(p_FC_pca/p_Cho_pca|p_Cort_pca/p_H_pca|p_Bill_pca/p_B_pca|p_U_pca/p0)
+grid.text("a)", x = unit(0.02, "npc"), y = unit(0.97, "npc"))
+grid.text("b)", x = unit(0.28, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("c)", x = unit(0.51, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("d)", x = unit(0.76, "npc"), y = unit(0.97, "npc")) #export as 1500x1000
+grid.text("e)", x = unit(0.02, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+grid.text("f)", x = unit(0.28, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+grid.text("g)", x = unit(0.51, "npc"), y = unit(0.49, "npc")) #export as 1500x1000
+dev.off()
+```
+
