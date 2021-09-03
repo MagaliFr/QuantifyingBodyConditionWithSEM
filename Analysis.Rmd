@@ -838,8 +838,7 @@ fitMeasures(Cmod.3.fit, c("chisq", "pvalue", "df","cfi", "srmr", "rmsea", "rmsea
 ```
 
 Code S6: The full model (Fig. 5) with only one size structure (tarsus length) and an added 
-direct effect of body size on survival. Body size is a latent variable in the model. For model 
-results in a figure see Fig. S13. The R-package used for the analysis is lavaan. 
+direct effect of body size on survival. For model results in a figure see Fig. S13. The R-package used for the analysis is lavaan. 
 
 ```{r warning=F}
 Cmod.4 <- '
@@ -874,7 +873,9 @@ fitMeasures(Cmod.4.fit,
               "rmsea.ci.upper", "AIC", "rmsea.pvalue")) 
 ```
 
-```{r include =F}
+Code S7: The full model (Fig. 5) with only one size structure (tarsus length) and only an 
+indirect effect of body size on survival. For model results in a figure see Fig. S13. The R-package used for the analysis is lavaan. 
+```{r warning=F}
 Cmod.5 <- '
 BCol =~ HS
 
