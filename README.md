@@ -3,4 +3,4 @@ This repository contains all data and R-code to reproduce the analysis and simul
 
 data.csv and dataCodeS11.csv are necessary for the Analysis.Rmd (also available as word document), which includes the main analysis of the paper (Fig. 2-6). 
 
-data.csv together with the Simulation.Rmd is necessary to reproduce the simulation (shown in Fig. 7). Because running of the simulations may take long, the global environment is also available (Simulation.Rdata). 
+data.csv together with the Simulation.Rmd is necessary to reproduce the simulation (shown in Fig. 7). Because running of the simulations takes long, the global environment (Simulation.Rdata) is also available to download as zip-file under 'Releases'. 
